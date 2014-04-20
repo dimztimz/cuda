@@ -1,0 +1,13 @@
+За успешно компалирање потребно е да се има библиотеката freeglut.
+За Windows e достапна овде http://www.transmissionzero.co.uk/software/freeglut-devel/ и се симнува верзијата за Microsoft Visual C++.
+Се отпакува некаде пример C:\msvclibs\ и потоа во проектот од Visual studio се поставуваат патеките до библиотеката.
+
+Се оди Project -> Properties -> VC++ Directories
+Во Executable directories се додава папката bin, ример C:\msvclibs\bin
+Во Include directories се додава папката include, ример C:\msvclibs\include
+Во Library directories се додава папката lib, ример C:\msvclibs\lib
+
+Потоа Лево се оди во Debbuging и во Environment се додава папката со бинарните датотеки во променливата PATH,
+пример PATH=%PATH%;C:\msvclibs\bin
+
+Откако ова е направено проектот може да се компајлира.

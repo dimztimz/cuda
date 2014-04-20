@@ -1,0 +1,9 @@
+julia cpu: sir=640 vis=480 vreme=140.195689
+julia gpu: sir=640 vis=480 thrX=8 thrY=16 vreme=8.232800
+julia cpu: sir=1366 vis=705 vreme=307.483611
+julia gpu: sir=1366 vis=705 thrX=8 thrY=16 vreme=17.558817
+
+julia cpu: sir=640 vis=480 vreme=67.853546
+julia gpu: sir=640 vis=480 thrX=8 thrY=16 vreme=8.252512
+julia cpu: sir=1366 vis=705 vreme=144.135200
+julia gpu: sir=1366 vis=705 thrX=8 thrY=16 vreme=17.557793
