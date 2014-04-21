@@ -34,6 +34,7 @@ __global__ void reduceSosedniElementi(const float * in, float * out, int len)
 		if (i < blockDim.x) {
 			cache[i] += cache[i+pomestuvanje];
 		}
+		__syncthreads();
 	}
 	if (threadIdx.x == 0) {
 		out[blockIdx.x] = cache[0];
