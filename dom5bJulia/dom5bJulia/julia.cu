@@ -58,4 +58,7 @@ void fillJuliaGPU(unsigned char * rgbaArray, int sirina, int visina, float xMin,
 	printf("julia gpu: sir=%d vis=%d thrX=%d thrY=%d vreme=%f\n", sirina, visina, blockDim.x, blockDim.y, vreme);
 	cudaMemcpy(rgbaArray, d_rgbaArray, sizeof(unsigned char) * 4 * sirina * visina, cudaMemcpyDeviceToHost);
 	cudaFree(d_rgbaArray);
+
+	cudaEventDestroy(start);
+	cudaEventDestroy(end);
 }

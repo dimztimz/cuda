@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cfloat>
+#include <cstring>
 
 #include <cuda_runtime.h>
 #include <omp.h>
@@ -34,7 +35,7 @@ __global__ void inclusiveScanHillisSteele1InBlock(const T * in, T * out, int len
 }
 
 template <int THREADSBLOCK, typename T>
-__global__ void inclusiveScanHillisSteele2OutBlock(T * out, T * outerBlockScan, int len)
+__global__ void inclusiveScanHillisSteele2OutBlock(const T * out, T * outerBlockScan, int len)
 {
 	__shared__ T cache[THREADSBLOCK*2];
 
@@ -61,7 +62,7 @@ __global__ void inclusiveScanHillisSteele2OutBlock(T * out, T * outerBlockScan, 
 }
 
 template <int THREADSBLOCK, typename T>
-__global__ void inclusiveScanHillisSteele3Merge(T * out, T * outerBlockScan, int len)
+__global__ void inclusiveScanHillisSteele3Merge(T * out, const T * outerBlockScan, int len)
 {
 	__shared__ T toAdd;
 	if (threadIdx.x == 0) {
@@ -265,8 +266,154 @@ void proveriTocnostExclusive() {
 	delete[] h_refScan;
 }
 
-
-int main()
+template <int THREADSBLOCK>
+void benchmarkInclusiveHillisSteele(FILE * outFile)
 {
-	proveriTocnostExclusive();
+	float * d_array, * d_scan, * d_buff;
+	cudaEvent_t start, end;
+	float vreme;
+	cudaEventCreate(&start);
+	cudaEventCreate(&end);
+
+	fprintf(outFile, "GPU hillis steele scan\n");
+	fprintf(outFile, "N;tile width;vreme\n");
+	for (int N = 32; N <= THREADSBLOCK*THREADSBLOCK; N+=32) {
+		cudaMalloc(&d_array, N*sizeof(float));
+		cudaMalloc(&d_scan, N*sizeof(float));
+		cudaMalloc(&d_buff, THREADSBLOCK*sizeof(float));
+		cudaEventRecord(start);
+		inclusiveScanHillisSteele1InBlock<THREADSBLOCK, float>
+			<<<(N+THREADSBLOCK-1)/THREADSBLOCK, THREADSBLOCK>>>(d_array, d_scan, N);
+		if (N > THREADSBLOCK) {
+			inclusiveScanHillisSteele2OutBlock<THREADSBLOCK, float><<<1, THREADSBLOCK>>>
+				(d_scan, d_buff, N);
+			inclusiveScanHillisSteele3Merge<THREADSBLOCK, float>
+				<<<(N+THREADSBLOCK-1)/THREADSBLOCK, THREADSBLOCK>>>(d_scan, d_buff, N);
+		}
+		cudaEventRecord(end);
+		cudaEventSynchronize(end);
+		cudaEventElapsedTime(&vreme, start, end);
+		cudaFree(d_array);
+		cudaFree(d_scan);
+		cudaFree(d_buff);
+		fprintf(outFile, "%d;%d;%f\n", N, THREADSBLOCK, vreme);
+	}
+
+	cudaEventDestroy(start);
+	cudaEventDestroy(end);
+}
+
+template <int THREADSBLOCK>
+void benchmarkExclusiveBlelloch(FILE * outFile)
+{
+	float * d_array, * d_scan, * d_buff;
+	cudaEvent_t start, end;
+	float vreme;
+	cudaEventCreate(&start);
+	cudaEventCreate(&end);
+
+	fprintf(outFile, "GPU blelloch scan\n");
+	fprintf(outFile, "N;tile width;vreme\n");
+	for (int N = 32; N <= THREADSBLOCK*THREADSBLOCK; N+=32) {
+		cudaMalloc(&d_array, N*sizeof(float));
+		cudaMalloc(&d_scan, N*sizeof(float));
+		cudaMalloc(&d_buff, THREADSBLOCK*sizeof(float));
+		cudaEventRecord(start);
+		exclusiveScanBlelloch1InBlock<THREADSBLOCK, float>
+			<<<(N+THREADSBLOCK-1)/THREADSBLOCK, THREADSBLOCK>>>(d_array, d_scan, N);
+		if (N > THREADSBLOCK) {
+			exclusiveScanBlelloch2OutBlock<THREADSBLOCK, float><<<1, THREADSBLOCK>>>
+				(d_array, d_scan, d_buff, N);
+			inclusiveScanHillisSteele3Merge<THREADSBLOCK, float>
+				<<<(N+THREADSBLOCK-1)/THREADSBLOCK, THREADSBLOCK>>>(d_scan, d_buff, N);
+		}
+		cudaEventRecord(end);
+		cudaEventSynchronize(end);
+		cudaEventElapsedTime(&vreme, start, end);
+		cudaFree(d_array);
+		cudaFree(d_scan);
+		cudaFree(d_buff);
+		fprintf(outFile, "%d;%d;%f\n", N, THREADSBLOCK, vreme);
+	}
+
+	cudaEventDestroy(start);
+	cudaEventDestroy(end);
+}
+
+void benchmark(const char * filenamePrefix)
+{
+	float * h_array, * h_scan;
+
+	FILE * cpuInclusiveOut = stdout, * cpuExclusiveOut = stdout;
+	FILE * gpuInclusiveOut = stdout, * gpuExclusiveOut = stdout;
+	if (filenamePrefix != NULL) {
+		char filename[256];
+		strncpy(filename, filenamePrefix, 256);
+		strncat(filename, "_cpuIncusive.csv", 256);
+		cpuInclusiveOut = fopen(filename, "w");
+		strncpy(filename, filenamePrefix, 256);
+		strncat(filename, "_cpuExclusive.csv", 256);
+		cpuExclusiveOut = fopen(filename, "w");
+		strncpy(filename, filenamePrefix, 256);
+		strncat(filename, "_gpuInclusive.csv", 256);
+		gpuInclusiveOut = fopen(filename, "w");
+		strncpy(filename, filenamePrefix, 256);
+		strncat(filename, "_gpuExclusive.csv", 256);
+		gpuExclusiveOut = fopen(filename, "w");
+	}
+
+	fprintf(cpuInclusiveOut, "CPU inclusive scan\n");
+	fprintf(cpuInclusiveOut, "N;vreme\n");
+	for (int N = 32; N < 512*512; N+=32) {
+		h_array = (float *)calloc(N, sizeof(float));
+		h_scan = (float *)calloc(N, sizeof(float));
+
+		double vreme = omp_get_wtime();
+		cpuInclusiveScan(h_array, h_scan, N);
+		vreme = omp_get_wtime() - vreme;
+		fprintf(cpuInclusiveOut, "%d;%lf\n", N, vreme*1000.0);
+
+		free(h_array);
+		free(h_scan);
+	}
+
+	fprintf(cpuExclusiveOut ,"CPU exclusive scan\n");
+	fprintf(cpuExclusiveOut, "N;vreme\n");
+	for (int N = 32; N < 512*512; N+=32) {
+		h_array = (float *)calloc(N, sizeof(float));
+		h_scan = (float *)calloc(N, sizeof(float));
+
+		double vreme = omp_get_wtime();
+		cpuExclusiveScan(h_array, h_scan, N);
+		vreme = omp_get_wtime() - vreme;
+		fprintf(cpuExclusiveOut, "%d;%lf\n", N, vreme*1000.0);
+
+		free(h_array);
+		free(h_scan);
+	}
+	
+	benchmarkInclusiveHillisSteele<32>(gpuInclusiveOut);
+	benchmarkInclusiveHillisSteele<64>(gpuInclusiveOut);
+	benchmarkInclusiveHillisSteele<128>(gpuInclusiveOut);
+	benchmarkInclusiveHillisSteele<256>(gpuInclusiveOut);
+	benchmarkInclusiveHillisSteele<512>(gpuInclusiveOut);
+	benchmarkInclusiveHillisSteele<1024>(gpuInclusiveOut);
+
+	benchmarkExclusiveBlelloch<32>(gpuExclusiveOut);
+	benchmarkExclusiveBlelloch<64>(gpuExclusiveOut);
+	benchmarkExclusiveBlelloch<128>(gpuExclusiveOut);
+	benchmarkExclusiveBlelloch<256>(gpuExclusiveOut);
+	benchmarkExclusiveBlelloch<512>(gpuExclusiveOut);
+	benchmarkExclusiveBlelloch<1024>(gpuExclusiveOut);
+
+	_fcloseall();
+}
+
+int main(int argc, char * argv[])
+{
+	if (argc > 1) {
+		benchmark(argv[1]);
+	} else {
+		benchmark((const char *)NULL);
+	}
 }
