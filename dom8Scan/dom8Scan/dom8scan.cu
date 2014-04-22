@@ -406,7 +406,10 @@ void benchmark(const char * filenamePrefix)
 	benchmarkExclusiveBlelloch<512>(gpuExclusiveOut);
 	benchmarkExclusiveBlelloch<1024>(gpuExclusiveOut);
 
-	_fcloseall();
+	fclose(cpuInclusiveOut);
+	fclose(cpuExclusiveOut);
+	fclose(gpuInclusiveOut);
+	fclose(gpuExclusiveOut);
 }
 
 int main(int argc, char * argv[])
