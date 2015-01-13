@@ -176,6 +176,81 @@ bool randomMatrixTest()
 	return greska;
 }
 
+template <typename T>
+void cpuLUDecomposition(T * L, T * U, int n)
+{
+	memset(L, 0, n*n*sizeof(T));
+	for (int i = 0; i < n; i++) {
+		L[i*n + i] = 1;
+		for (int j = i + 1; j < n; j++) {
+			T koef = U[j*n + i] / U[i*n + i];
+			L[j*n + i] = koef;
+			for (int k = i; k < n; k++) {
+				U[j*n + k] -= koef * U[i*n + k];
+			}
+		}
+	}
+}
+
+bool test1cpuLU()
+{
+	float A[16] = { 1, 2, 3, 4, 4, 5, 6, 7, 7, 8, 10, 11, 11, 12, 13, 15 };
+	float L[16], U[16], novoA[16];
+	int n = 4;
+	memcpy(U, A, sizeof(A));
+	cpuLUDecomposition<float>(L, U, n);
+	printMatrix<float>(L, n, n);
+	cout << '*' << endl;
+	printMatrix<float>(U, n, n);
+	cout << '=' << endl;
+	matMulCpuNaive<float>(L, U, novoA, n, n, n);
+	printMatrix<float>(novoA, n, n);
+	bool greska = proveriGreska<float>(A, novoA, n*n) > 0.0001;
+	if (greska) {
+		cout << "razlicno so referentna matrica, GRESKA" << endl;
+		printMatrix<float>(A, n, n);
+	}
+	else {
+		cout << "ednakvo so referentna matrica, TOCNO" << endl;
+	}
+	return greska;
+}
+
+bool randomMatrixTestCPU()
+{
+	srand((unsigned int)time(NULL));
+	int n = rand() % 1000;
+	for (int i = n; i--;) {
+		n = rand() % 1000;
+	}
+	cout << "Test na A = LU, A e so slucajni broevi i ima golemina " << n << endl;
+	float * A = new float[n*n];
+	float * L = new float[n*n];
+	float * U = new float[n*n];
+	float * novoA = new float[n*n];
+
+	for (int i = 0; i < n*n; i++) {
+		A[i] = (float)(rand() % 1000);
+	}
+	memcpy(U, A, sizeof(float)*n*n);
+	cpuLUDecomposition<float>(L, U, n);
+	matMulCpuNaive<float>(L, U, novoA, n, n, n);
+	float maxGreska = proveriGreska<float>(A, novoA, n*n);
+	bool greska = maxGreska > 0.01;
+	if (greska) {
+		cout << "razlicno so referentna matrica, najgolema greska e " << maxGreska << endl;
+	}
+	else {
+		cout << "priblizno ednakvo so referentna matrica, TOCNO, greksa: " << maxGreska << endl;
+	}
+
+	delete[] A;
+	delete[] L;
+	delete[] U;
+	delete[] novoA;
+	return greska;
+}
+
 void benchmark()
 {
 
@@ -184,8 +259,9 @@ void benchmark()
 int main()
 {
 	test1();
-	cout << endl;
 	randomMatrixTest();
+	test1cpuLU();
+	randomMatrixTestCPU();
 	system("pause");
 	return 0;
 }
