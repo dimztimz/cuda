@@ -49,10 +49,8 @@ void printMatrix(T * mat, int red, int kol, ostream& out = std::cout)
 }
 
 template <typename T>
-void lu(T * d_L, T * d_U, int n)
+void lu(T * d_L, T * d_U, int n, const int NUMTHREAD = 128)
 {
-	const int NUMTHREAD = 128;
-
 	cudaMemset(d_L, 0, sizeof(T)*n*n);
 	for (int i = 0; i < n-1; i++) {
 		int lu1blocks = (n-i + NUMTHREAD - 1) / NUMTHREAD;
@@ -126,7 +124,7 @@ bool test1()
 
 bool randomMatrixTest()
 {
-	srand(time(NULL));
+	srand((unsigned int)time(NULL));
 	int n = rand()%1000;
 	for (int i = n; i--;) {
 		n = rand() % 1000;
