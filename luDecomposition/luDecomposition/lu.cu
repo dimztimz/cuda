@@ -8,6 +8,8 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
+#include <omp.h>
+
 using namespace std;
 
 template <typename T>
@@ -253,15 +255,46 @@ bool randomMatrixTestCPU()
 
 void benchmark()
 {
-
+	int AAsize = 2000;
+	float * AA = new float[AAsize*AAsize];
+	srand((unsigned int)time(NULL));
+	for (int i = 0; i < AAsize*AAsize; i++) {
+		AA[i] = (float)(rand() % 1000);
+	}
+	cout << "LU on CPU" << endl;
+	cout << "N,povtoruvanja,vkupno vreme,prosecno vreme po LU za N" << endl;
+	for (int N = 32; N < AAsize; N += 32) {
+		float * oldL = NULL, *oldU = NULL;
+		float * A = new float[N*N];
+		int povt = (int)((double)AAsize*AAsize*AAsize / N / N / N + 0.5);
+		double totalTime = 0.0;
+		for (int j = 0; j < povt; j++) {
+			float * L = new float[N*N];
+			float * U = new float[N*N];
+			delete[] oldL;
+			delete[] oldU;
+			for (int i = 0; i < N; i++) {
+				for (int j = 0; j < N; j++) {
+					A[i*N + j] = AA[i*AAsize + j];
+				}
+			}
+			memcpy(U, A, sizeof(float)*N*N);
+			double start = omp_get_wtime();
+			cpuLUDecomposition<float>(L, U, N);
+			double end = omp_get_wtime();
+			totalTime += end - start;
+			oldL = L;
+			oldU = U;
+		}
+		cout << N << ',' << povt << ',' << totalTime << ',' << totalTime / povt << endl;
+		delete[] oldL;
+		delete[] oldU;
+		delete[] A;
+	}
 }
 
 int main()
 {
-	test1();
-	randomMatrixTest();
-	test1cpuLU();
-	randomMatrixTestCPU();
-	system("pause");
+	benchmark();
 	return 0;
 }
