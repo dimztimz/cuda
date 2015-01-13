@@ -1,5 +1,5 @@
 #include <iostream>
-#include <algorithm>
+#include <fstream>
 
 #include <time.h>
 #include <stdlib.h>
@@ -7,54 +7,8 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-#include <device_functions.h>
 
 using namespace std;
-
-template <typename T>
-__global__ void luStaro(T * matrica, T * lMat, T * uMat, int n)
-{
-	int idx = blockDim.x * blockIdx.x + threadIdx.x;
-	
-	if (idx >= n*n) {
-		return;
-	}
-
-	int redica = idx / n;
-	int kolona = idx % n;
-
-	uMat[idx] = matrica[idx];
-
-	lMat[idx] = 0;
-	for (int i = 0; i < n; i++) {
-		// presmetaj koeficienti
-		
-		/*
-		//so sledniov kod prvite n posledovatelni niski od celata mreza zapisuvaat vo edna kolona od L
-		if (idx < i) { //vo ovoj if vleguvaat prvite i niski od celata mreza t.e. od 0 do i-1
-			lMat[idx * n + i] = 0;
-		} else if (idx < n) { // a vo ovoj ostanatite do n t.e od i do n-1
-			lMat[idx * n + i] = uMat[idx * n + i] / uMat[i * n + i];
-			//printf("%f ", lMat[idx * n + i]);
-		}
-		*/
-		if (kolona == i && redica >= i) {
-			lMat[redica*n + kolona] = uMat[redica*n + kolona] / uMat[kolona*n + kolona];
-		}
-		//problemot e tuka, nekoi blokovi pocnuva eliminacija pred da se presmeta koeficietot koj go stavame vo L
-		//na mestovo kade st ostoi komentarov idealno treba da stoi bariera na celata mreza, a ne samo na vo blok
-		//edno resenie da presmetuvame koef vo L, a potoa sekoja niska posebno uste pri samata eliminacija da si presmetuva
-
-		__threadfence(); // ne vrsi rabota
-		//eliminacija
-		if (redica > i) {
-			uMat[redica * n + kolona] -= lMat[redica * n + i] * uMat[i * n + kolona];
-		}
-		
-		__threadfence();
-
-	}
-}
 
 template <typename T>
 __global__ void lu1(T * L, T * U, int n, int i)
@@ -84,13 +38,13 @@ __global__ void lu2(T * L, T * U, int n, int i)
 }
 
 template <typename T>
-void printMatrix(T * mat, int red, int kol)
+void printMatrix(T * mat, int red, int kol, ostream& out = std::cout)
 {
 	for (int i = 0; i < red; i++) {
 		for (int j = 0; j < red; j++) {
-			cout << mat[i*kol + j] << ' ';
+			out << mat[i*kol + j] << ' ';
 		}
-		cout << endl;
+		out << endl;
 	}
 }
 
@@ -99,40 +53,24 @@ void lu(T * d_L, T * d_U, int n)
 {
 	const int NUMTHREAD = 128;
 
-	float * L = new float[n*n];
-	float * U = new float[n*n];
-
-	/*cudaMemcpy(U, d_U, sizeof(U[0])*n*n, cudaMemcpyDeviceToHost);
-	printMatrix<float>(U, n, n);
-	cout << "======" << endl;*/
-
 	cudaMemset(d_L, 0, sizeof(T)*n*n);
 	for (int i = 0; i < n-1; i++) {
 		int lu1blocks = (n-i + NUMTHREAD - 1) / NUMTHREAD;
 		int lu2blocks = ((n-i-1)*(n-i) + NUMTHREAD - 1) / NUMTHREAD;
 		lu1<T> << <lu1blocks, NUMTHREAD >> >(d_L, d_U, n, i);
 		lu2<T> << <lu2blocks, NUMTHREAD >> >(d_L, d_U, n, i);
-
-		/*cudaMemcpy(L, d_L, sizeof(L[0])*n*n, cudaMemcpyDeviceToHost);
-		cudaMemcpy(U, d_U, sizeof(U[0])*n*n, cudaMemcpyDeviceToHost);
-
-		printMatrix<float>(L, n, n);
-		cout << '*' << endl;
-		printMatrix<float>(U, n, n);
-		cout << "======" << endl;*/
 	}
 	lu1<T> << <1, 1 >> >(d_L, d_U, n, n-1);
-
-	delete[] L; delete[] U;
 }
 
-void matMulCpuNaive(const float * A, const float * B, float * C, int redA, int kolARedB, int kolB)
+template <typename T>
+void matMulCpuNaive(const T * A, const T * B, T * C, int redA, int kolARedB, int kolB)
 {
 	for (int i = 0; i < redA; i++) {
 		for (int j = 0; j< kolB; j++) {
-			float s = 0.0f;
-			const float * Apok = A + i*kolARedB;
-			const float * Bpok = B + j;
+			T s = 0.0f;
+			const T * Apok = A + i*kolARedB;
+			const T * Bpok = B + j;
 			for (int k = 0; k<kolARedB; k++) {
 				s += *Apok * *Bpok;
 				Apok++;
@@ -143,16 +81,16 @@ void matMulCpuNaive(const float * A, const float * B, float * C, int redA, int k
 	}
 }
 
-bool proveriGreska(const float * referenceMat, const float * presmetanaMat, int len)
+template <typename T>
+T proveriGreska(const T * referenceMat, const T * presmetanaMat, int len)
 {
-	bool greska = false;
+	T maxGreska = 0.0f;
 	for (int i = 0; i<len; i++) {
-		if (referenceMat[i] != presmetanaMat[i]) {
-			greska = true;
-			//printf("Greska vo index %d, %f != %f\n", i, referenceMat[i], presmetanaMat[i]);
+		if (abs(referenceMat[i] - presmetanaMat[i]) > maxGreska) {
+			maxGreska = abs(referenceMat[i] - presmetanaMat[i]);
 		}
 	}
-	return greska;
+	return maxGreska;
 }
 
 bool test1()
@@ -169,16 +107,16 @@ bool test1()
 	cudaMemcpy(U, d_U, sizeof(U), cudaMemcpyDeviceToHost);
 	cudaFree(d_L);
 	cudaFree(d_U);
-	printMatrix<float>(L, 4, 4);
+	printMatrix<float>(L, n, n);
 	cout << '*' << endl;
-	printMatrix<float>(U, 4, 4);
+	printMatrix<float>(U, n, n);
 	cout << '=' << endl;
-	matMulCpuNaive(L, U, novoA, 4, 4, 4);
-	printMatrix<float>(novoA, 4, 4);
-	bool greska = proveriGreska(A, novoA, 16);
+	matMulCpuNaive<float>(L, U, novoA, n, n, n);
+	printMatrix<float>(novoA, n, n);
+	bool greska = proveriGreska<float>(A, novoA, n*n) > 0.0001;
 	if (greska) {
 		cout << "razlicno so referentna matrica, GRESKA" << endl;
-		printMatrix<float>(A, 4, 4);
+		printMatrix<float>(A, n, n);
 	}
 	else {
 		cout << "ednakvo so referentna matrica, TOCNO" << endl;
@@ -189,7 +127,11 @@ bool test1()
 bool randomMatrixTest()
 {
 	srand(time(NULL));
-	int n = 6;
+	int n = rand()%1000;
+	for (int i = n; i--;) {
+		n = rand() % 1000;
+	}
+	cout << "Test na A = LU, A e so slucajni broevi i ima golemina " << n << endl;
 	float * A = new float[n*n];
 	float * L = new float[n*n];
 	float * U = new float[n*n];
@@ -198,7 +140,7 @@ bool randomMatrixTest()
 	for (int i = 0; i < n*n; i++) {
 		A[i] = (float)(rand() % 1000);
 	}
-
+	
 	float *d_U, *d_L;
 	cudaMalloc(&d_L, sizeof(L[0])*n*n);
 	cudaMalloc(&d_U, sizeof(U[0])*n*n);
@@ -209,25 +151,36 @@ bool randomMatrixTest()
 	cudaFree(d_L);
 	cudaFree(d_U);
 
-	printMatrix<float>(L, n, n);
-	cout << '*' << endl;
-	printMatrix<float>(U, n, n);
-	cout << '=' << endl;
-	matMulCpuNaive(L, U, novoA, n, n, n);
-	printMatrix<float>(novoA, n, n);
-	bool greska = proveriGreska(A, novoA, n*n);
+	matMulCpuNaive<float>(L, U, novoA, n, n, n);
+	float maxGreska = proveriGreska<float>(A, novoA, n*n);
+	bool greska = maxGreska > 0.01;
 	if (greska) {
-		cout << "razlicno so referentna matrica, GRESKA" << endl;
-		printMatrix<float>(A, n, n);
+		cout << "razlicno so referentna matrica, najgolema greska e " << maxGreska << endl;
+		/*
+		ofstream izlezL("L.txt");
+		ofstream izlezU("U.txt");
+		ofstream izlezRefA("refA.txt");
+		ofstream izlezNovoA("novoA.txt");
+		printMatrix(L, n, n, izlezL);
+		printMatrix(U, n, n, izlezU);
+		printMatrix(A, n, n, izlezRefA);
+		printMatrix(novoA, n, n, izlezNovoA);
+		//datotekite avotamatski se zatvoraat preku destruktorite koi avotmatski se povikuvaat tuka
+		*/
+	} else {
+		cout << "priblizno ednakvo so referentna matrica, TOCNO, greksa: " << maxGreska  << endl;
 	}
-	else {
-		cout << "ednakvo so referentna matrica, TOCNO" << endl;
-	}
+
 	delete[] A;
 	delete[] L;
 	delete[] U;
 	delete[] novoA;
 	return greska;
+}
+
+void benchmark()
+{
+
 }
 
 int main()
