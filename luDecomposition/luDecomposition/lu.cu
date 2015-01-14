@@ -255,7 +255,7 @@ bool randomMatrixTestCPU()
 
 void benchmark()
 {
-	int AAsize = 2000;
+	int AAsize = 1600;
 	float * AA = new float[AAsize*AAsize];
 	srand((unsigned int)time(NULL));
 	for (int i = 0; i < AAsize*AAsize; i++) {
@@ -267,6 +267,7 @@ void benchmark()
 		float * oldL = NULL, *oldU = NULL;
 		float * A = new float[N*N];
 		int povt = (int)((double)AAsize*AAsize*AAsize / N / N / N + 0.5);
+		if (povt < 3) povt = 3;
 		double totalTime = 0.0;
 		for (int j = 0; j < povt; j++) {
 			float * L = new float[N*N];
@@ -291,6 +292,50 @@ void benchmark()
 		delete[] oldU;
 		delete[] A;
 	}
+
+	cout << "cuda LU on GPU" << endl;
+	cout << "N,povtoruvanja,vkupno vreme,prosecno vreme po LU za N" << endl;
+	cudaEvent_t start, end;
+	cudaEventCreate(&start);
+	cudaEventCreate(&end);
+	for (int N = 32; N < AAsize; N += 32) {
+
+		float * d_L, *d_U;
+		cudaMalloc(&d_L, sizeof(float)*AAsize*AAsize * 4);
+		cudaMalloc(&d_U, sizeof(float)*AAsize*AAsize * 4);
+		float * A = new float[N*N];
+		for (int i = 0; i < N; i++) {
+			for (int j = 0; j < N; j++) {
+				A[i*N + j] = AA[i*AAsize + j];
+			}
+		}
+		int povt = (int)((double)1000 * 1000 * 1000 / N / N / N + 0.5);
+		if (povt < 3) povt = 3;
+		float totalTime = 0.0;
+		for (int j = 0; j < povt; j++) {
+			int offset = j*N*N % (AAsize*AAsize * 4);
+			if (offset + N*N > AAsize*AAsize * 4) {
+				offset = 0;
+			}
+
+			cudaMemcpy(d_U + offset, A, sizeof(float)*N*N, cudaMemcpyHostToDevice);
+			cudaEventRecord(start);
+			lu<float>(d_L + offset, d_U + offset, N);
+			cudaEventRecord(end);
+			cudaEventSynchronize(end);
+			float time;
+			cudaEventElapsedTime(&time, start, end);
+			totalTime += time;
+		}
+		cout << N << ',' << povt << ',' << totalTime << ',' << totalTime / povt << endl;
+		cudaFree(d_L);
+		cudaFree(d_U);
+		delete[] A;
+	}
+	cudaEventDestroy(start);
+	cudaEventDestroy(end);
+
+	delete[] AA;
 }
 
 int main()
