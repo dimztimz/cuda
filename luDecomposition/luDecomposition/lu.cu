@@ -255,66 +255,81 @@ bool randomMatrixTestCPU()
 
 void benchmark()
 {
-	int AAsize = 1600;
-	float * AA = new float[AAsize*AAsize];
+	int MIN_SIZE = 32, MAX_SIZE = 2100;
+	float * AA = new float[MAX_SIZE*MAX_SIZE];
 	srand((unsigned int)time(NULL));
-	for (int i = 0; i < AAsize*AAsize; i++) {
+	for (int i = 0; i < MAX_SIZE*MAX_SIZE; i++) {
 		AA[i] = (float)(rand() % 1000);
 	}
+	/*
+	Pravime benchmark taka sto za razlicni golemini na matrici, t.e. za razlicno N merime vreme T_N_i
+	kade T_N_i ni e vreme na edna LU za matrica so golemina N. Ova go smetame za eden eksperiment.
+	Za sekoe N, ekperimentot go povtoruvame povt(N) pati i potoa presmetuvame prosecno vreme T_N.
+	T_N = Suma(T_N_i, i=1..povt(N))/N
+	povt kje ni bude negativna stepenska funkcija povt(N)=a/N^3+b.
+	za MIN_SIZE kje imame POVT_MIN_SIZE = 100000
+	za MAX_SIZE kje imame POVT_MAX_SIZE = 100
+	a i b od povt(N) gi procenuvame preku sistem lieanrni ravenki
+	a/MIN_SIZE^3 + b = POVT_MIN_SIZE
+	a/MAX_SIZE^3 + b = POVT_MAX_SIZE
+	*/
+	int POVT_MAX_SIZE = 100, POVT_MIN_SIZE = 100000;
+	double povtA = (POVT_MAX_SIZE - POVT_MIN_SIZE)*1.0 / (1.0 / MAX_SIZE / MAX_SIZE / MAX_SIZE - 1.0 / MIN_SIZE / MIN_SIZE / MIN_SIZE);
+	double povtB = 1.0*POVT_MAX_SIZE*MAX_SIZE*MAX_SIZE*MAX_SIZE - 1.0*POVT_MIN_SIZE*MIN_SIZE*MIN_SIZE*MIN_SIZE;
+	povtB /= 1.0*MAX_SIZE*MAX_SIZE*MAX_SIZE - 1.0*MIN_SIZE*MIN_SIZE*MIN_SIZE;
 	cout << "LU on CPU" << endl;
-	cout << "N,povtoruvanja,vkupno vreme,prosecno vreme po LU za N" << endl;
-	for (int N = 32; N < AAsize; N += 32) {
-		float * oldL = NULL, *oldU = NULL;
+	cout << "N,povtoruvanja,vkupno vreme (s),prosecno vreme (s)" << endl;
+	for (int N = MIN_SIZE; N < MAX_SIZE; N += 32) {
 		float * A = new float[N*N];
-		int povt = (int)((double)AAsize*AAsize*AAsize / N / N / N + 0.5);
-		if (povt < 3) povt = 3;
-		double totalTime = 0.0;
-		for (int j = 0; j < povt; j++) {
-			float * L = new float[N*N];
-			float * U = new float[N*N];
-			delete[] oldL;
-			delete[] oldU;
-			for (int i = 0; i < N; i++) {
-				for (int j = 0; j < N; j++) {
-					A[i*N + j] = AA[i*AAsize + j];
-				}
+		float * L = new float[MAX_SIZE*MAX_SIZE * 4];
+		float * U = new float[MAX_SIZE*MAX_SIZE * 4];
+		for (int i = 0; i < N; i++) {
+			for (int j = 0; j < N; j++) {
+				A[i*N + j] = AA[i*MAX_SIZE + j];
 			}
-			memcpy(U, A, sizeof(float)*N*N);
+		}
+		int povt = (int)(povtA / N / N / N + povtB + 0.5);
+		double totalTime = 0.0;
+		//Offsetot ni e za sekoe povtoruvanej na eksprimetot da rabotime so "necepnata" meorija, memorija sto ne se naogja vo kesovite
+		for (int j = 0, offset = 0; j < povt; j++, offset += N*N) {
+			offset %= MAX_SIZE*MAX_SIZE * 4;
+			if (offset + N*N > MAX_SIZE*MAX_SIZE * 4) {
+				offset = 0;
+			}
+			
+			memcpy(U+offset, A, sizeof(float)*N*N);
 			double start = omp_get_wtime();
-			cpuLUDecomposition<float>(L, U, N);
+			cpuLUDecomposition<float>(L+offset, U+offset, N);
 			double end = omp_get_wtime();
 			totalTime += end - start;
-			oldL = L;
-			oldU = U;
 		}
 		cout << N << ',' << povt << ',' << totalTime << ',' << totalTime / povt << endl;
-		delete[] oldL;
-		delete[] oldU;
+		delete[] L;
+		delete[] U;
 		delete[] A;
 	}
-
+	
 	cout << "cuda LU on GPU" << endl;
-	cout << "N,povtoruvanja,vkupno vreme,prosecno vreme po LU za N" << endl;
+	cout << "N,povtoruvanja,vkupno vreme (ms),prosecno vreme (ms)" << endl;
 	cudaEvent_t start, end;
 	cudaEventCreate(&start);
 	cudaEventCreate(&end);
-	for (int N = 32; N < AAsize; N += 32) {
+	for (int N = MIN_SIZE; N < MAX_SIZE; N += 32) {
 
 		float * d_L, *d_U;
-		cudaMalloc(&d_L, sizeof(float)*AAsize*AAsize * 4);
-		cudaMalloc(&d_U, sizeof(float)*AAsize*AAsize * 4);
+		cudaMalloc(&d_L, sizeof(float)*MAX_SIZE*MAX_SIZE * 4);
+		cudaMalloc(&d_U, sizeof(float)*MAX_SIZE*MAX_SIZE * 4);
 		float * A = new float[N*N];
 		for (int i = 0; i < N; i++) {
 			for (int j = 0; j < N; j++) {
-				A[i*N + j] = AA[i*AAsize + j];
+				A[i*N + j] = AA[i*MAX_SIZE + j];
 			}
 		}
-		int povt = (int)((double)1000 * 1000 * 1000 / N / N / N + 0.5);
-		if (povt < 3) povt = 3;
+		int povt = (int)(povtA / N / N / N + povtB + 0.5);
 		float totalTime = 0.0;
-		for (int j = 0; j < povt; j++) {
-			int offset = j*N*N % (AAsize*AAsize * 4);
-			if (offset + N*N > AAsize*AAsize * 4) {
+		for (int j = 0, offset = 0; j < povt; j++, offset += N*N) {
+			offset %= MAX_SIZE*MAX_SIZE * 4;
+			if (offset + N*N > MAX_SIZE*MAX_SIZE * 4) {
 				offset = 0;
 			}
 
