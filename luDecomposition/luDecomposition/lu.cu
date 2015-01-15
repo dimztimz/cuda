@@ -356,5 +356,6 @@ void benchmark()
 int main()
 {
 	benchmark();
+	system("pause");
 	return 0;
 }
